@@ -76,6 +76,7 @@ export class FeedMonitor {
         }
         
         const text = `${item.title || ''} ${item['dc:content'] || ''} ${item.content || ''} ${item.summary || ''} ${item.contentSnippet || ''} ${item['content:encoded'] || ''}`.toLowerCase();
+        //Empty means ntfy
         return keywords.length === 0 || keywords.some(keyword =>
           text.includes(keyword.toLowerCase())
         );
