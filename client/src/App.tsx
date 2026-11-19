@@ -4,12 +4,13 @@ import { FeedForm } from './components/FeedForm';
 import { FeedStatus } from './components/FeedStatus';
 import { SettingsForm } from './components/SettingsForm';
 import { FeedHistory } from './components/FeedHistory';
-import { AppConfig, FeedStatus as FeedStatusType } from './server/types';
+import type { AppConfig, PublicAppConfig, FeedStatus as FeedStatusType } from '../../server/src/types';
 
 export default function App() {
-  const [config, setConfig] = useState<AppConfig>({
+  const [config, setConfig] = useState<PublicAppConfig>({
     feeds: [],
     ntfyServerAddress: 'https://ntfy.sh',
+    hasNtfyBearerToken: false,
     checkIntervalMinutes: 15,
     defaultNtfyTopic: 'rss',
   });
@@ -61,17 +62,18 @@ export default function App() {
     }
   };
 
-  const handleSettingsSubmit = async (ntfyServerAddress: string, checkIntervalMinutes: number, defaultNtfyTopic: string) => {
+  const handleSettingsSubmit = async (settings: Omit<AppConfig, 'feeds'>) => {
     try {
       setLoading(true);
-      await fetch('/api/config', {
+      const response = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...config, ntfyServerAddress, checkIntervalMinutes, defaultNtfyTopic }),
+        body: JSON.stringify({ feeds: config.feeds, ...settings }),
       });
+      if (!response.ok) {
+        throw new Error((await response.json()).error);
+      }
       await fetchConfig();
-    } catch (error) {
-      console.error('Failed to update settings:', error);
     } finally {
       setLoading(false);
     }
@@ -117,6 +119,7 @@ export default function App() {
         <Tabs.Panel value="settings">
           <SettingsForm
             initialNtfyServerAddress={config.ntfyServerAddress}
+            hasNtfyBearerToken={config.hasNtfyBearerToken}
             initialCheckInterval={config.checkIntervalMinutes}
             initialDefaultNtfyTopic={config.defaultNtfyTopic}
             onSubmit={handleSettingsSubmit}

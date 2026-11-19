@@ -15,6 +15,7 @@ export class FeedMonitor {
     maxEntries: 1000 // Store up to 1000 entries
   };
   private postHistoryManager: PostHistoryManager;
+  private pendingHistoryOperation = Promise.resolve();
 
   constructor(configManager: ConfigManager) {
     this.parser = new Parser<object, RssItemCustomFields>({
@@ -69,68 +70,40 @@ export class FeedMonitor {
 
     try {
       const feed = await this.parser.parseURL(url);
-      const newItems = feed.items.filter((item: RssItem) => {
-        // Skip already checked posts
+      const checkedAt = new Date().toISOString();
+      for (const item of feed.items as RssItem[]) {
         if (item.guid && this.postHistoryManager.isPostChecked(item.guid)) {
-          return false;
+          continue;
         }
-        
+
         const text = `${item.title || ''} ${item['dc:content'] || ''} ${item.content || ''} ${item.summary || ''} ${item.contentSnippet || ''} ${item['content:encoded'] || ''}`.toLowerCase();
-        //Empty means ntfy
-        return keywords.length === 0 || keywords.some(keyword =>
+        const matchedKeywords = keywords.filter(keyword =>
           text.includes(keyword.toLowerCase())
         );
-      });
-
-      const matchingItems = newItems.map((item: RssItem) => ({
-        title: (item.title || '').trim(),
-        link: item.link || '',
-        description: item['dc:content'] || item['content:encoded'] || item.content || item.summary || item.contentSnippet || '',
-        content: item['dc:content'] || item['content:encoded'] || item.content || '',
-        summary: item.summary || '',
-        contentSnippet: item.contentSnippet || '',
-        pubDate: item.pubDate || ''
-      }));
-
-      const checkedAt = new Date().toISOString();
-      for (const item of matchingItems) {
-        const matchedKeywords = keywords.filter(keyword =>
-          `${item.title} ${item.content}`.toLowerCase().includes(keyword.toLowerCase())
-        );
-        
-        // Add to history before sending notification
-        const historyEntry: FeedHistoryEntry = {
-          ...item,
-          feedUrl: url,
-          checkedAt,
-          notificationSent: false,
-          matchedKeywords
-        };
-        
-        await this.sendNotification(item, matchedKeywords, feedConfig);
-        
-        // Update history entry to reflect sent notification
-        historyEntry.notificationSent = true;
-        this.addToHistory(historyEntry);
-      }
-
-      // Track all items in post history
-      feed.items.forEach((item: RssItem) => {
-        if (item.guid && !this.postHistoryManager.isPostChecked(item.guid)) {
-          const text = `${item.title || ''} ${item['dc:content'] || ''} ${item.content || ''} ${item.summary || ''} ${item.contentSnippet || ''} ${item['content:encoded'] || ''}`.toLowerCase();
-          const matchedKeywords = keywords.filter(keyword => 
-            text.includes(keyword.toLowerCase())
+        const title = (item.title || '').trim();
+        const link = item.link || '';
+        const shouldNotify = keywords.length === 0 || matchedKeywords.length > 0;
+        if (shouldNotify) {
+          const notification: FeedItem = {
+            title,
+            link,
+            description: item['dc:content'] || item['content:encoded'] || item.content || item.summary || item.contentSnippet || '',
+            content: item['dc:content'] || item['content:encoded'] || item.content || '',
+            summary: item.summary || '',
+            contentSnippet: item.contentSnippet || '',
+            pubDate: item.pubDate || ''
+          };
+          const notificationKeywords = keywords.filter(keyword =>
+            `${notification.title} ${notification.content}`.toLowerCase().includes(keyword.toLowerCase())
           );
-          this.postHistoryManager.addCheckedPost(
-            item.guid,
-            url,
-            (item.title || '').trim(),
-            item.link || '',
-            matchedKeywords,
-            matchedKeywords.length > 0  // notification sent if keywords matched
-          );
+          await this.sendNotification(notification, notificationKeywords, feedConfig);
+          this.addToHistory({ ...notification, feedUrl: url, checkedAt, notificationSent: true, matchedKeywords: notificationKeywords });
         }
-      });
+
+        if (item.guid) {
+          this.postHistoryManager.addCheckedPost(item.guid, url, title, link, matchedKeywords, shouldNotify);
+        }
+      }
 
       this.status[url] = {
         lastCheck: checkedAt,
@@ -169,39 +142,55 @@ export class FeedMonitor {
       description = `${description}\n\n${item.link}`;
     }
     
-    try {
-      console.log(`🔔 Sending notification: "${sanitizedTitle}" to ${ntfyUrl}`);
-      const headers: Record<string, string> = {
-        'Title': sanitizedTitle,
-        'Priority': settings.priority,
-      };
+    console.log(`🔔 Sending notification: "${sanitizedTitle}" to ${ntfyUrl}`);
+    const headers: Record<string, string> = {
+      'Title': sanitizedTitle,
+      'Priority': settings.priority,
+    };
 
-      // Add tags if enabled
-      if (settings.includeKeywordTags && matchedKeywords.length > 0) {
-        headers['Tags'] = matchedKeywords.join(',');
-      }
+    if (config.ntfyBearerToken) {
+      headers['Authorization'] = `Bearer ${config.ntfyBearerToken}`;
+    }
 
-      // Add Open action if enabled
-      if (settings.includeOpenAction && item.link) {
-        headers['Actions'] = `view, Open, ${item.link}`;
-      }
+    // Add tags if enabled
+    if (settings.includeKeywordTags && matchedKeywords.length > 0) {
+      headers['Tags'] = matchedKeywords.join(',');
+    }
 
-      await fetch(ntfyUrl, {
-        method: 'POST',
-        body: description,
-        headers,
-      });
-    } catch (error) {
-      console.error(`❌ Failed to send "${sanitizedTitle}"\n  → Error: ${error instanceof Error ? error.message : String(error)}`);
+    // Add Open action if enabled
+    if (settings.includeOpenAction && item.link) {
+      headers['Actions'] = `view, Open, ${item.link}`;
+    }
+
+    const response = await fetch(ntfyUrl, {
+      method: 'POST',
+      body: description,
+      headers,
+    });
+    await response.arrayBuffer();
+    if (!response.ok) {
+      throw new Error(`ntfy rejected the notification (HTTP ${response.status})`);
     }
   }
 
-  public async checkFeeds(): Promise<void> {
-    const config = this.configManager.getConfig();
-    const checkPromises = config.feeds.map((feed: FeedConfig) => 
-      this.checkFeed(feed.url, feed.keywords)
-    );
-    await Promise.all(checkPromises);
+  private runHistoryOperation(operation: () => void | Promise<void>): Promise<void> {
+    const result = this.pendingHistoryOperation.then(operation);
+    this.pendingHistoryOperation = result.catch(() => {});
+    return result;
+  }
+
+  public checkFeeds(): Promise<void> {
+    return this.runHistoryOperation(async () => {
+      const { feeds } = this.configManager.getConfig();
+      await Promise.all(feeds.map(feed => this.checkFeed(feed.url, feed.keywords)));
+    });
+  }
+
+  public clearHistory(): Promise<void> {
+    return this.runHistoryOperation(() => {
+      this.postHistoryManager.clearHistory();
+      this.history.entries = [];
+    });
   }
 
   public getStatus(): Record<string, FeedStatus> {
@@ -276,4 +265,4 @@ export class FeedMonitor {
 
     await this.sendNotification(testItem, ["keyword1", "keyword2"], testConfig);
   }
-} 
+}

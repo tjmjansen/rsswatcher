@@ -37,6 +37,13 @@ export class PostHistoryManager {
         return guid in this.history;
     }
 
+    public clearHistory(): void {
+        const temporaryFile = `${POST_HISTORY_FILE}.tmp`;
+        fs.writeFileSync(temporaryFile, '{}');
+        fs.renameSync(temporaryFile, POST_HISTORY_FILE);
+        this.history = {};
+    }
+
     public addCheckedPost(guid: string, feedUrl: string, title: string, link: string, matchedKeywords: string[] = [], notificationSent: boolean = false) {
         this.history[guid] = {
             feedUrl,
@@ -68,4 +75,4 @@ export class PostHistoryManager {
     public getHistory(): PostHistory {
         return this.history;
     }
-} 
+}

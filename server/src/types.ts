@@ -1,7 +1,7 @@
-import Parser from 'rss-parser';
-import { FeedConfig, NotificationSettings, NtfyPriority } from 'shared/types.js';
+import type Parser from 'rss-parser';
+import type { FeedConfig, NotificationSettings, NtfyPriority } from 'shared/types.js';
 
-export { FeedConfig, NotificationSettings, NtfyPriority };
+export type { FeedConfig, NotificationSettings, NtfyPriority };
 
 export interface RssItemCustomFields {
   'dc:content'?: string;
@@ -45,8 +45,13 @@ export interface FeedHistoryEntry extends FeedItem {
 export interface AppConfig {
   feeds: FeedConfig[];
   ntfyServerAddress: string;
+  ntfyBearerToken?: string;
   checkIntervalMinutes: number;
   defaultNtfyTopic: string;
+}
+
+export interface PublicAppConfig extends Omit<AppConfig, 'ntfyBearerToken'> {
+  hasNtfyBearerToken: boolean;
 }
 
 export interface PostHistory {
@@ -58,4 +63,4 @@ export interface PostHistory {
         matchedKeywords: string[];
         notificationSent: boolean;
     };
-} 
+}

@@ -41,13 +41,15 @@ export class ConfigManager {
     return { ...this.config };
   }
 
-  public async updateConfig(newConfig: AppConfig): Promise<void> {
-    this.config = newConfig;
+  public updateConfig(newConfig: AppConfig): void {
     try {
-      await fs.promises.writeFile(CONFIG_FILE, JSON.stringify(newConfig, null, 2));
+      const temporaryFile = `${CONFIG_FILE}.tmp`;
+      fs.writeFileSync(temporaryFile, JSON.stringify(newConfig, null, 2));
+      fs.renameSync(temporaryFile, CONFIG_FILE);
+      this.config = newConfig;
     } catch (error) {
       console.error('Error saving config:', error);
       throw new Error('Failed to save configuration');
     }
   }
-} 
+}

@@ -1,4 +1,4 @@
-import { Modal, TextInput, Switch, Select, Stack, Button, Group, Paper, Text } from '@mantine/core';
+import { Alert, Modal, TextInput, Switch, Select, Stack, Button, Group, Paper, Text } from '@mantine/core';
 import { NotificationSettings, NtfyPriority } from 'shared/types';
 import { useState, useEffect } from 'react';
 
@@ -12,10 +12,12 @@ interface NotificationSettingsModalProps {
 export function NotificationSettingsModal({ opened, onClose, settings, onSave }: NotificationSettingsModalProps) {
   const [localSettings, setLocalSettings] = useState<NotificationSettings>(settings);
   const [isTesting, setIsTesting] = useState(false);
+  const [testError, setTestError] = useState(false);
 
   useEffect(() => {
     setLocalSettings(settings);
-  }, [settings]);
+    setTestError(false);
+  }, [opened, settings]);
 
   const handleSave = () => {
     onSave(localSettings);
@@ -32,7 +34,8 @@ export function NotificationSettingsModal({ opened, onClose, settings, onSave }:
   const handleTestNotification = async () => {    
     try {
       setIsTesting(true);
-      await fetch('/api/test-notification', {
+      setTestError(false);
+      const response = await fetch('/api/test-notification', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -41,8 +44,10 @@ export function NotificationSettingsModal({ opened, onClose, settings, onSave }:
           topic: localSettings.ntfyTopic
         })
       });
+      if (!response.ok) throw new Error('Failed to send test notification');
     } catch (error) {
       console.error('Failed to send test notification:', error);
+      setTestError(true);
     } finally {
       setIsTesting(false);
     }
@@ -136,6 +141,7 @@ export function NotificationSettingsModal({ opened, onClose, settings, onSave }:
           </Stack>
         </Paper>
 
+        {testError && <Alert color="red" role="alert">Failed to send test notification. Check your ntfy settings and topic.</Alert>}
         <Group justify="space-between" mt="md">
           <Button onClick={handleTestNotification} loading={isTesting} variant="light">
             Test Notification
@@ -148,4 +154,4 @@ export function NotificationSettingsModal({ opened, onClose, settings, onSave }:
       </Stack>
     </Modal>
   );
-} 
+}

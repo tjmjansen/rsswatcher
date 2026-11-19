@@ -1,5 +1,5 @@
 import { Paper, Text, Group, Stack, ScrollArea } from '@mantine/core';
-import { FeedStatus as FeedStatusType } from '../server/types';
+import type { FeedStatus as FeedStatusType } from '../../../server/src/types';
 
 interface FeedStatusProps {
   status: Record<string, FeedStatusType>;
@@ -40,4 +40,4 @@ export function FeedStatus({ status }: FeedStatusProps) {
       </ScrollArea>
     </Stack>
   );
-} 
+}

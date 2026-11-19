@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { ConfigManager } from './config.js';
 import { FeedMonitor } from './feedMonitor.js';
-import { AppConfig } from './types.js';
+import { AppConfig, PublicAppConfig } from './types.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Socket } from 'net';
@@ -54,8 +54,9 @@ export class Server {
     // Get current configuration
     this.app.get('/api/config', (_req, res) => {
       try {
-        const config = this.configManager.getConfig();
-        res.json(config);
+        const { ntfyBearerToken, ...config } = this.configManager.getConfig();
+        const publicConfig: PublicAppConfig = { ...config, hasNtfyBearerToken: Boolean(ntfyBearerToken) };
+        res.json(publicConfig);
       } catch (error) {
         console.error('Failed to get configuration:', error);
         res.status(500).json({ error: 'Failed to get configuration' });
@@ -76,11 +77,36 @@ export class Server {
       }
     });
 
-    // Update configuration
-    this.app.post('/api/config', async (req, res) => {
+    this.app.delete('/api/history', async (_req, res) => {
       try {
-        const newConfig: AppConfig = req.body;
-        await this.configManager.updateConfig(newConfig);
+        await this.feedMonitor.clearHistory();
+        res.sendStatus(204);
+      } catch (error) {
+        console.error('Failed to clear history:', error);
+        res.status(500).json({ error: 'Failed to clear history' });
+      }
+    });
+
+    // Update configuration
+    this.app.post('/api/config', (req, res) => {
+      try {
+        const { feeds, ntfyServerAddress, checkIntervalMinutes, defaultNtfyTopic, ntfyBearerToken }: AppConfig = req.body;
+        if (ntfyBearerToken !== undefined && (
+          typeof ntfyBearerToken !== 'string' || !/^(?:[A-Za-z0-9._~+/-]+=*)?$/.test(ntfyBearerToken)
+        )) {
+          res.status(400).json({ error: 'Enter a valid bearer token without the Bearer prefix.' });
+          return;
+        }
+
+        this.configManager.updateConfig({
+          feeds,
+          ntfyServerAddress,
+          checkIntervalMinutes,
+          defaultNtfyTopic,
+          ntfyBearerToken: ntfyBearerToken === undefined
+            ? this.configManager.getConfig().ntfyBearerToken
+            : ntfyBearerToken || undefined,
+        });
         this.feedMonitor.updateConfig();
         res.json({ success: true });
       } catch (error) {
@@ -166,4 +192,4 @@ Monitoring your feeds! 📰
       });
     }
   }
-} 
+}

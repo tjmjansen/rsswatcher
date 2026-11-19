@@ -1,23 +1,29 @@
-import { TextInput, NumberInput, Button, Stack, Group, Paper, Text } from '@mantine/core';
+import { Alert, Button, Checkbox, Group, NumberInput, Paper, PasswordInput, Stack, Text, TextInput } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import type { AppConfig } from '../../../server/src/types';
 
 interface SettingsFormProps {
   initialNtfyServerAddress: string;
+  hasNtfyBearerToken: boolean;
   initialCheckInterval: number;
   initialDefaultNtfyTopic: string;
-  onSubmit: (ntfyServerAddress: string, checkInterval: number, defaultNtfyTopic: string) => void;
+  onSubmit: (settings: Omit<AppConfig, 'feeds'>) => Promise<void>;
 }
 
 export function SettingsForm({
   initialNtfyServerAddress,
+  hasNtfyBearerToken,
   initialCheckInterval,
   initialDefaultNtfyTopic,
   onSubmit,
 }: SettingsFormProps) {
+  const [submitError, setSubmitError] = useState('');
   const form = useForm({
     initialValues: {
       ntfyServerAddress: initialNtfyServerAddress,
+      ntfyBearerToken: '',
+      removeNtfyBearerToken: false,
       checkInterval: initialCheckInterval,
       defaultNtfyTopic: initialDefaultNtfyTopic,
     },
@@ -31,16 +37,32 @@ export function SettingsForm({
     },
   });
 
+  const { setValues } = form;
   useEffect(() => {
-    form.setValues({
+    setValues({
       ntfyServerAddress: initialNtfyServerAddress,
       checkInterval: initialCheckInterval,
       defaultNtfyTopic: initialDefaultNtfyTopic,
     });
-  }, [initialNtfyServerAddress, initialCheckInterval, initialDefaultNtfyTopic]);
+  }, [setValues, initialNtfyServerAddress, initialCheckInterval, initialDefaultNtfyTopic]);
+
+  const handleSubmit = form.onSubmit(async (values) => {
+    setSubmitError('');
+    try {
+      await onSubmit({
+        ntfyServerAddress: values.ntfyServerAddress,
+        checkIntervalMinutes: values.checkInterval,
+        defaultNtfyTopic: values.defaultNtfyTopic,
+        ntfyBearerToken: values.removeNtfyBearerToken ? '' : values.ntfyBearerToken.trim() || undefined,
+      });
+      form.setValues({ ntfyBearerToken: '', removeNtfyBearerToken: false });
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Failed to save settings');
+    }
+  });
 
   return (
-    <form onSubmit={form.onSubmit((values) => onSubmit(values.ntfyServerAddress, values.checkInterval, values.defaultNtfyTopic))}>
+    <form onSubmit={handleSubmit}>
       <Stack>
         {/* Notification Settings Section */}
         <Paper withBorder p="md">
@@ -59,6 +81,19 @@ export function SettingsForm({
               required
               {...form.getInputProps('defaultNtfyTopic')}
             />
+            <PasswordInput
+              label="Bearer Token"
+              description={hasNtfyBearerToken ? 'Leave blank to keep the saved token' : 'Optional access token for protected topics'}
+              autoComplete="new-password"
+              disabled={form.values.removeNtfyBearerToken}
+              {...form.getInputProps('ntfyBearerToken')}
+            />
+            {hasNtfyBearerToken && (
+              <Checkbox
+                label="Remove saved token"
+                {...form.getInputProps('removeNtfyBearerToken', { type: 'checkbox' })}
+              />
+            )}
           </Stack>
         </Paper>
 
@@ -77,10 +112,11 @@ export function SettingsForm({
           </Stack>
         </Paper>
 
+        {submitError && <Alert color="red" role="alert">{submitError}</Alert>}
         <Group justify="flex-end" mt="md">
           <Button type="submit">Save Settings</Button>
         </Group>
       </Stack>
     </form>
   );
-} 
+}
